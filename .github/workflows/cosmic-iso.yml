@@ -6,8 +6,6 @@ on:
     branches:
       - cosmic-0.1-dev
     paths:
-      - "installer/**"
-      - ".github/workflows/cosmic-iso.yml"
       - "VERSION-COSMIC"
   workflow_dispatch:
 
@@ -74,9 +72,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The live environment only needs to host Anaconda/installer tooling.
-          # The installed system payload is our COSMIC Deck image.
-          BASE_IMAGE="ghcr.io/ublue-os/bazzite:stable"
+          # Live environment: our non-Deck COSMIC runtime.
+          # Installed payload: our COSMIC Deck image.
+          BASE_IMAGE="ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-cosmic-live:${IMAGE_TAG}"
           INSTALL_IMAGE_PAYLOAD="ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}"
 
           sudo env TMPDIR=/mnt/podman-storage/tmp podman build             --cap-add sys_admin             --security-opt label=disable             --build-arg BASE_IMAGE="${BASE_IMAGE}"             --build-arg INSTALL_IMAGE_PAYLOAD="${INSTALL_IMAGE_PAYLOAD}"             --build-arg FLATPAK_DIR_SHORTNAME="kde_flatpaks"             -t localhost/cosmic-installer:0.1-dev             installer/
@@ -125,7 +123,9 @@ jobs:
           {
             echo "## Bazzite COSMIC 0.1-dev ISO"
             echo
-            echo "Payload: `ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}`"
+            echo "Live desktop: `ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-cosmic-live:${IMAGE_TAG}`"
+            echo
+            echo "Installed payload: `ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}`"
             echo
             echo "Artifact: `bazzite-deck-cosmic-0.1-dev-live-amd64`"
             echo

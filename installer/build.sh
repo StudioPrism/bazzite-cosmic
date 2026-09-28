@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_IMAGE=${BASE_IMAGE:?}
 INSTALL_IMAGE_PAYLOAD=${INSTALL_IMAGE_PAYLOAD:?}
 FLATPAK_DIR_SHORTNAME=${FLATPAK_DIR_SHORTNAME:?}
+LIVE_DESKTOP_ENV=${LIVE_DESKTOP_ENV:-}
 
 # Create the directory that /root is symlinked to
 mkdir -p "$(realpath /root)"
@@ -29,8 +30,10 @@ else
     podman pull "$INSTALL_IMAGE_PAYLOAD"
 fi
 
-# Determine desktop environment
-if [[ ${BASE_IMAGE} == *-gnome* ]]; then
+# Determine desktop environment. LIVE_DESKTOP_ENV overrides image-name heuristics.
+if [[ -n "${LIVE_DESKTOP_ENV}" ]]; then
+    desktop_env="${LIVE_DESKTOP_ENV}"
+elif [[ ${BASE_IMAGE} == *-gnome* ]]; then
     desktop_env="gnome"
 else
     desktop_env="kde"
@@ -60,11 +63,7 @@ DRACUT_NO_XATTR=1 dracut -v --force --zstd --reproducible --no-hostonly \
 
 # Install livesys-scripts and configure them
 dnf install -y livesys-scripts
-if [[ ${BASE_IMAGE} == *-gnome* ]]; then
-    sed -i "s/^livesys_session=.*/livesys_session=gnome/" /etc/sysconfig/livesys
-else
-    sed -i "s/^livesys_session=.*/livesys_session=kde/" /etc/sysconfig/livesys
-fi
+sed -i "s/^livesys_session=.*/livesys_session=${desktop_env}/" /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
 
 # Run the postrootfs hook

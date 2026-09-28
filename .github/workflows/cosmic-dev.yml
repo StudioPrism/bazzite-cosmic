@@ -1,0 +1,111 @@
+name: Build COSMIC Deck 0.1-dev
+
+on:
+  push:
+    branches:
+      - cosmic-0.1-dev
+    paths:
+      - "Containerfile"
+      - "build_files/**"
+      - "system_files/**"
+      - ".github/workflows/cosmic-dev.yml"
+      - "VERSION-COSMIC"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "Containerfile"
+      - "build_files/**"
+      - "system_files/**"
+      - ".github/workflows/cosmic-dev.yml"
+      - "VERSION-COSMIC"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: cosmic-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: bazzite-deck-cosmic
+  FEDORA_VERSION: "44"
+  BASE_IMAGE_NAME: kinoite
+  BASE_IMAGE: ghcr.io/ublue-os/kinoite-main:44
+  KERNEL_FLAVOR: ogc
+  KERNEL_VERSION: 7.2.4-ogc3.1.fc44
+  NVIDIA_FLAVOR: nvidia-open
+  NVIDIA_BASE: bazzite-deck
+
+jobs:
+  build:
+    name: Build 0.1-dev
+    runs-on: ubuntu-26.04
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          sha_short="${GITHUB_SHA::7}"
+          version="0.1-dev-${FEDORA_VERSION}-${sha_short}"
+          pretty="COSMIC 0.1-dev (Fedora ${FEDORA_VERSION}, #${sha_short})"
+
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${sha_short}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "pretty=${pretty}" >> "$GITHUB_OUTPUT"
+
+      - name: Build bootc image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          buildah build             --target bazzite-deck-cosmic             --build-arg BASE_IMAGE_NAME="${BASE_IMAGE_NAME}"             --build-arg FEDORA_VERSION="${FEDORA_VERSION}"             --build-arg BASE_IMAGE="${BASE_IMAGE}"             --build-arg IMAGE_NAME="${IMAGE_NAME}"             --build-arg IMAGE_VENDOR="${{ steps.meta.outputs.owner }}"             --build-arg IMAGE_BRANCH="cosmic-0.1-dev"             --build-arg KERNEL_FLAVOR="${KERNEL_FLAVOR}"             --build-arg KERNEL_VERSION="${KERNEL_VERSION}"             --build-arg NVIDIA_FLAVOR="${NVIDIA_FLAVOR}"             --build-arg NVIDIA_BASE="${NVIDIA_BASE}"             --build-arg SHA_HEAD_SHORT="${{ steps.meta.outputs.sha_short }}"             --build-arg VERSION_TAG="${{ steps.meta.outputs.version }}"             --build-arg VERSION_PRETTY="${{ steps.meta.outputs.pretty }}"             --build-arg ARCH="x86_64"             --secret "id=GITHUB_TOKEN,env=GITHUB_TOKEN"             --tag "${IMAGE_NAME}:${{ steps.meta.outputs.version }}"             .
+
+      - name: Verify COSMIC and Plasma recovery paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${IMAGE_NAME}:${{ steps.meta.outputs.version }}"
+
+          podman run --rm "${image}" test -f /usr/share/wayland-sessions/cosmic.desktop
+          podman run --rm "${image}" test -f /usr/share/wayland-sessions/plasma.desktop
+          podman run --rm "${image}" test -x /usr/bin/start-cosmic
+          podman run --rm "${image}" test -x /usr/bin/startplasma-wayland
+          podman run --rm "${image}" test -x /usr/bin/cosmic-deck-recovery
+          podman run --rm "${image}" grep -q 'desktop = "cosmic.desktop"' /usr/share/steamos-manager/platform.toml
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io             -u "${{ github.actor }}"             --password-stdin
+
+      - name: Push dev image
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${IMAGE_NAME}:${{ steps.meta.outputs.version }}"
+          output="ghcr.io/${{ steps.meta.outputs.owner }}/${IMAGE_NAME}"
+
+          podman push "${image}" "${output}:${{ steps.meta.outputs.version }}"
+          podman push "${image}" "${output}:0.1-dev"
+          podman push "${image}" "${output}:dev"

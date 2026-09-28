@@ -1,0 +1,64 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Bazzite COSMIC 0.1-dev recovery helper
+
+Usage:
+  cosmic-deck-recovery status
+  cosmic-deck-recovery plasma
+  cosmic-deck-recovery cosmic
+  cosmic-deck-recovery game
+
+Commands:
+  status   Show available desktop sessions and current deployment information.
+  plasma   Stop the current user graphical session and launch Plasma from this TTY.
+  cosmic   Stop the current user graphical session and launch COSMIC from this TTY.
+  game     Request a return to Bazzite Game Mode.
+
+Recommended recovery TTY: Ctrl+Alt+F3
+EOF
+}
+
+cmd="${1:-status}"
+
+case "$cmd" in
+  status)
+    echo "== Desktop sessions =="
+    ls -1 /usr/share/wayland-sessions/*.desktop 2>/dev/null || true
+    echo
+    echo "== Bazzite deployment =="
+    bootc status 2>/dev/null || rpm-ostree status 2>/dev/null || true
+    echo
+    echo "COSMIC launcher:  $(command -v start-cosmic || echo missing)"
+    echo "Plasma launcher:  $(command -v startplasma-wayland || echo missing)"
+    echo "Game Mode helper: $(command -v return-to-gamemode || echo missing)"
+    ;;
+  plasma)
+    command -v startplasma-wayland >/dev/null || {
+      echo "Plasma Wayland launcher is missing." >&2
+      exit 1
+    }
+    systemctl --user stop graphical-session.target 2>/dev/null || true
+    exec dbus-run-session -- startplasma-wayland
+    ;;
+  cosmic)
+    command -v start-cosmic >/dev/null || {
+      echo "COSMIC launcher is missing." >&2
+      exit 1
+    }
+    systemctl --user stop graphical-session.target 2>/dev/null || true
+    exec start-cosmic
+    ;;
+  game)
+    exec /usr/bin/return-to-gamemode
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

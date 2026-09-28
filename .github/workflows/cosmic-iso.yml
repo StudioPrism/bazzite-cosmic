@@ -1,0 +1,174 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Build COSMIC Deck 0.1-dev ISO
+
+on:
+  push:
+    branches:
+      - cosmic-0.1-dev
+    paths:
+      - "VERSION-COSMIC"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: cosmic-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: bazzite-deck-cosmic
+  IMAGE_TAG: 0.1-dev
+
+jobs:
+  build-iso:
+    name: Build bootable ISO
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
+        with:
+          tool-cache: true
+
+      - name: Mount container storage BTRFS loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo truncate -s 110G /mnt/podman-storage.img
+          sudo mkfs.btrfs -f -m single -d single /mnt/podman-storage.img
+          sudo podman system reset --force
+          sudo systemctl stop podman.service
+          LOOP=$(sudo losetup --find --show --direct-io=on /mnt/podman-storage.img)
+          sudo mkdir -p /mnt/podman-storage
+          sudo mount -o compress-force=zstd:2,discard=async,noatime "$LOOP" /mnt/podman-storage
+          sudo mkdir -p /mnt/podman-storage/storage /mnt/podman-storage/tmp
+          sudo mount --bind /mnt/podman-storage/storage /var/lib/containers/storage
+          sudo systemctl start podman.service
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Resolve registry owner
+        id: owner
+        shell: bash
+        run: echo "lowercase=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io \
+            -u "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Verify COSMIC images exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo inspect \
+            --creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "docker://ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}" \
+            >/dev/null
+          skopeo inspect \
+            --creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "docker://ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-cosmic-live:${IMAGE_TAG}" \
+            >/dev/null
+
+      - name: Build live installer payload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Live environment: our non-Deck COSMIC runtime.
+          # Installed payload: our COSMIC Deck image.
+          BASE_IMAGE="ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-cosmic-live:${IMAGE_TAG}"
+          INSTALL_IMAGE_PAYLOAD="ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          sudo env TMPDIR=/mnt/podman-storage/tmp podman build \
+            --cap-add sys_admin \
+            --security-opt label=disable \
+            --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+            --build-arg INSTALL_IMAGE_PAYLOAD="${INSTALL_IMAGE_PAYLOAD}" \
+            --build-arg FLATPAK_DIR_SHORTNAME="kde_flatpaks" \
+            --build-arg LIVE_DESKTOP_ENV="cosmic" \
+            -t localhost/cosmic-installer:0.1-dev \
+            installer/
+
+      - name: Build ISO
+        uses: Zeglius/titanoboa@revamp-pr
+        id: build
+        with:
+          image-ref: localhost/cosmic-installer:0.1-dev
+          iso-dest: bazzite-deck-cosmic-0.1-dev-live-amd64.iso
+
+      - name: Prepare ISO artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/upload"
+          iso="${{ steps.build.outputs.iso-dest }}"
+          name=$(basename "${iso}")
+          mv "${iso}" "${GITHUB_WORKSPACE}/upload/${name}"
+          (
+            cd "${GITHUB_WORKSPACE}/upload"
+            sha256sum "${name}" > "${name}-CHECKSUM"
+          )
+          echo "dir=${GITHUB_WORKSPACE}/upload" >> "$GITHUB_OUTPUT"
+
+      - name: Attest ISO
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: ${{ steps.artifacts.outputs.dir }}/*.iso
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazzite-deck-cosmic-0.1-dev-live-amd64
+          path: ${{ steps.artifacts.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+      - name: Publish 0.1 test prerelease
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v0.1-test
+          RELEASE_TITLE: Bazzite COSMIC 0.1 Test Build
+          ISO_DIR: ${{ steps.artifacts.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}"               --repo "${GITHUB_REPOSITORY}"               --target "${GITHUB_SHA}"               --title "${RELEASE_TITLE}"               --prerelease               --notes "Initial Bazzite Deck + COSMIC 0.1 hardware test build. The live USB boots into COSMIC; the installed system preserves Bazzite Game Mode and keeps Plasma installed as a recovery fallback."
+          fi
+
+          gh release upload "${RELEASE_TAG}"             "${ISO_DIR}/bazzite-deck-cosmic-0.1-dev-live-amd64.iso"             "${ISO_DIR}/bazzite-deck-cosmic-0.1-dev-live-amd64.iso-CHECKSUM"             --repo "${GITHUB_REPOSITORY}"             --clobber
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## Bazzite COSMIC 0.1-dev ISO"
+            echo
+            echo "Live desktop: `ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-cosmic-live:${IMAGE_TAG}`"
+            echo
+            echo "Installed payload: `ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}`"
+            echo
+            echo "Artifact: `bazzite-deck-cosmic-0.1-dev-live-amd64`"
+            echo
+            echo "Prerelease: `v0.1-test`"
+            echo
+            echo "This is an experimental development image. Plasma remains installed as fallback."
+          } >> "$GITHUB_STEP_SUMMARY"

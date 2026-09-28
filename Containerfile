@@ -565,6 +565,34 @@ RUN --mount=type=cache,dst=/var/cache \
 
 RUN --mount=type=tmpfs,target=/run --network=none bootc container lint
 
+#####################
+# COSMIC LIVE BUILD
+#####################
+
+# 0.1-dev live/installer runtime. This is intentionally non-Deck so the
+# live ISO boots directly to a conventional COSMIC desktop session.
+# Plasma remains present underneath for now; the installer explicitly
+# selects COSMIC as the live session.
+FROM bazzite AS bazzite-cosmic-live
+
+ARG IMAGE_NAME="${IMAGE_NAME:-bazzite-cosmic-live}"
+ARG IMAGE_VENDOR="${IMAGE_VENDOR:-StudioPrism}"
+ARG IMAGE_BRANCH="${IMAGE_BRANCH:-cosmic-0.1-dev}"
+
+RUN --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/cache/libdnf5 \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=bind,from=ctx,source=/,target=/ctx \
+    --mount=type=tmpfs,dst=/tmp \
+    dnf5 config-manager unsetopt skip_if_unavailable && \
+    dnf5 -y install cosmic-session && \
+    test -f /usr/share/wayland-sessions/cosmic.desktop && \
+    test -x /usr/bin/start-cosmic && \
+    dnf5 config-manager setopt skip_if_unavailable=1 && \
+    /ctx/cleanup
+
+RUN --mount=type=tmpfs,target=/run --network=none bootc container lint
+
 ################
 # DECK BUILDS
 ################

@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       packages: read
       id-token: write
       attestations: write
@@ -117,6 +117,23 @@ jobs:
           compression-level: 0
           overwrite: true
 
+      - name: Publish 0.1 test prerelease
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v0.1-test
+          RELEASE_TITLE: Bazzite COSMIC 0.1 Test Build
+          ISO_DIR: ${{ steps.artifacts.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}"               --repo "${GITHUB_REPOSITORY}"               --target "${GITHUB_SHA}"               --title "${RELEASE_TITLE}"               --prerelease               --notes "Initial Bazzite Deck + COSMIC 0.1 hardware test build. The live USB boots into COSMIC; the installed system preserves Bazzite Game Mode and keeps Plasma installed as a recovery fallback."
+          fi
+
+          gh release upload "${RELEASE_TAG}"             "${ISO_DIR}/bazzite-deck-cosmic-0.1-dev-live-amd64.iso"             "${ISO_DIR}/bazzite-deck-cosmic-0.1-dev-live-amd64.iso-CHECKSUM"             --repo "${GITHUB_REPOSITORY}"             --clobber
+
       - name: Summary
         shell: bash
         run: |
@@ -128,6 +145,8 @@ jobs:
             echo "Installed payload: `ghcr.io/${{ steps.owner.outputs.lowercase }}/${IMAGE_NAME}:${IMAGE_TAG}`"
             echo
             echo "Artifact: `bazzite-deck-cosmic-0.1-dev-live-amd64`"
+            echo
+            echo "Prerelease: `v0.1-test`"
             echo
             echo "This is an experimental development image. Plasma remains installed as fallback."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -123,24 +123,6 @@ jobs:
           )
           echo "dir=${GITHUB_WORKSPACE}/upload" >> "$GITHUB_OUTPUT"
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-        with:
-          cosign-release: "v3.1.3"
-
-      - name: Sign ISO
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
-          ISO_DIR: ${{ steps.artifacts.outputs.dir }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for iso in "${ISO_DIR}"/*.iso; do
-            cosign sign-blob -y --key env://COSIGN_PRIVATE_KEY \
-              --new-bundle-format=false --use-signing-config=false \
-              --output-signature "${iso}.sig" "${iso}"
-          done
-
       - name: Attest ISO
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8

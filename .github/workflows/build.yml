@@ -4,8 +4,7 @@ on:
     - cron: "40 4 * * 1" # 4:40 utc monday
   pull_request:
     branches:
-      - testing
-      - unstable
+      - cosmic-0.1-dev
     paths-ignore:
       - "**.md"
       - "**.txt"
@@ -18,8 +17,7 @@ on:
       - ".github/workflows/build_iso*.yml"
   push:
     branches:
-      - testing
-      - unstable
+      - cosmic-0.1-dev
     paths-ignore:
       - "**.md"
       - "**.txt"
@@ -70,7 +68,9 @@ jobs:
           fi
 
           version="${fedora_version}.$(date +%Y%m%d)"
-          if [[ "${{ github.ref_name }}" == "unstable" ]]; then
+          if [[ "${{ github.ref_name }}" == "cosmic-0.1-dev" ]]; then
+            version="0.1-dev-${version}"
+          elif [[ "${{ github.ref_name }}" == "unstable" ]]; then
             version="unstable-${version}"
           elif [[ "${{ github.ref_name }}" == "testing" ]]; then
             version="testing-${version}"
@@ -111,16 +111,7 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - bazzite
-          - bazzite-gnome
-          - bazzite-deck
-          - bazzite-deck-gnome
-          - bazzite-deck-nvidia
-          - bazzite-deck-nvidia-gnome
-          - bazzite-nvidia
-          - bazzite-gnome-nvidia
-          - bazzite-nvidia-open
-          - bazzite-gnome-nvidia-open
+          - bazzite-deck-cosmic
         include:
           - fedora_version: 44
             kernel_flavor: ogc
@@ -168,7 +159,11 @@ jobs:
           #
           # Define Container Target
           #
-          if [[ "$IMAGE" == *"deck"* && "$IMAGE" == *"nvidia"* ]]; then
+          if [[ "$IMAGE" == "bazzite-deck-cosmic" ]]; then
+            echo "container_target=bazzite-deck-cosmic" >> "$GITHUB_OUTPUT"
+            echo "nvidia_base=bazzite-deck" >> "$GITHUB_OUTPUT" # NOOP
+            echo "install_nvidia=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$IMAGE" == *"deck"* && "$IMAGE" == *"nvidia"* ]]; then
             echo "container_target=bazzite-nvidia" >> "$GITHUB_OUTPUT"
             echo "nvidia_base=bazzite-deck" >> "$GITHUB_OUTPUT"
             echo "install_nvidia=true" >> "$GITHUB_OUTPUT"
@@ -262,6 +257,9 @@ jobs:
           if [ -n "${{ github.event.pull_request.number }}" ]; then
             VERSION="pr-${FEDORA_VERSION}-${{ github.event.pull_request.number }}"
             PRETTY_VERSION="PR (${{ github.event.pull_request.number }}, ${UPSTREAM_TAG})"
+          elif [[ ${{ github.ref_name }} == "cosmic-0.1-dev" ]]; then
+            VERSION="0.1-dev-${UPSTREAM_TAG}-${SHA_SHORT}"
+            PRETTY_VERSION="COSMIC 0.1-dev (F${UPSTREAM_TAG}, #${SHA_SHORT})"
           elif [[ ${{ github.ref_name }} == "unstable" ]]; then
             VERSION="unstable-${UPSTREAM_TAG}"
             PRETTY_VERSION="Unstable (F${UPSTREAM_TAG}, #${SHA_SHORT})"
@@ -493,7 +491,9 @@ jobs:
           # Common vars for generating tags
           VERSION_TAG="${{ steps.relabel.outputs.version }}"
 
-          if [[ ${{ github.ref_name }} == "unstable" ]]; then
+          if [[ ${{ github.ref_name }} == "cosmic-0.1-dev" ]]; then
+            BUILD_TAGS=("0.1-dev" "dev" "dev-${{ matrix.fedora_version }}")
+          elif [[ ${{ github.ref_name }} == "unstable" ]]; then
             BUILD_TAGS=("unstable" "unstable-${{ matrix.fedora_version }}")
           elif [[ ${{ github.ref_name }} == "testing" ]]; then
             BUILD_TAGS=("testing" "testing-${{ matrix.fedora_version }}")

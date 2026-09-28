@@ -786,6 +786,8 @@ ARG IMAGE_BRANCH="${IMAGE_BRANCH:-cosmic-0.1-dev}"
 
 COPY system_files/deck/cosmic/ /
 
+RUN chmod +x /usr/bin/cosmic-deck-recovery
+
 RUN --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/cache/libdnf5 \
     --mount=type=cache,dst=/var/log \
